@@ -5,6 +5,7 @@ from flask import Flask, jsonify, render_template, request
 
 from compare import compare_templates
 from contract import audit_contract
+from draft import DraftError, draft_scenario
 from icu import MAX_SCENARIOS, analyze, run_scenarios
 
 app = Flask(__name__)
@@ -57,6 +58,41 @@ def scenarios_run():
             "variables": sc.get("variables", {}),
         })
     return jsonify(run_scenarios(template, norm))
+
+
+@app.post("/api/scenarios/draft")
+def scenarios_draft():
+    """未覆盖路径求解：为一条路径反推自洽变量，生成可保存的场景草稿。
+
+    草稿只在响应中返回，不写入任何场景集；前端经用户确认后自行保存到
+    浏览器本地的场景集。模板错误 / 路径不存在 / locale 下不可达 / 无解
+    / 超过枚举上限均返回 200 + {ok:false, reason, message}，由调用方
+    明确展示原因。
+    """
+    data = request.get_json(force=True, silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"ok": False, "error": "请求体必须是 JSON 对象"}), 400
+    template = data.get("template", "")
+    if not isinstance(template, str):
+        return jsonify({"ok": False, "error": "template 必须是字符串"}), 400
+    locale = data.get("locale", "en")
+    if not isinstance(locale, str) or not locale.strip():
+        return jsonify({"ok": False, "error": "locale 必须是非空字符串"}), 400
+    path_key_value = data.get("path_key", "")
+    if not isinstance(path_key_value, str):
+        return jsonify({"ok": False, "error": "path_key 必须是字符串"}), 400
+    variables = data.get("variables", {})
+    if not isinstance(variables, dict):
+        return jsonify({"ok": False, "error": "variables 必须是对象"}), 400
+    name = data.get("name")
+    if name is not None and not isinstance(name, str):
+        return jsonify({"ok": False, "error": "name 必须是字符串"}), 400
+    try:
+        return jsonify(draft_scenario(
+            template, locale, path_key_value, variables, name or None))
+    except DraftError as exc:
+        return jsonify({"ok": False, "reason": exc.code,
+                        "error": exc.message})
 
 
 @app.post("/api/compare")

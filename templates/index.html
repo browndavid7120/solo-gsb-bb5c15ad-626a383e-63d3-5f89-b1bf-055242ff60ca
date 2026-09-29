@@ -224,6 +224,72 @@
     </div>
   </section>
 
+  <!-- 未覆盖路径草稿对话框 -->
+  <div id="draftModal" class="modal-mask" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="draftTitle">
+      <div class="modal-head">
+        <h3 id="draftTitle">为未覆盖路径生成场景草稿</h3>
+        <button id="btnDraftClose" class="btn btn-small btn-outline"
+                title="关闭（不保存）">×</button>
+      </div>
+      <div id="draftNotices" class="modal-notices"></div>
+
+      <!-- 生成中 / 失败视图 -->
+      <div id="draftForm" class="modal-body">
+        <div class="draft-form-row">
+          <label class="field">
+            <span>语言环境（locale）</span>
+            <input id="draftLocale" list="localeList" autocomplete="off">
+          </label>
+        </div>
+        <div class="panel-head">
+          <h4>编辑器变量样例（优先沿用，冲突时自动改求）</h4>
+        </div>
+        <div id="draftVarRows" class="var-rows"></div>
+        <div class="draft-actions-row">
+          <button id="btnDraftRegenerate" class="btn btn-outline">重新求解</button>
+        </div>
+      </div>
+
+      <!-- 成功视图 -->
+      <div id="draftResult" class="modal-body" hidden>
+        <div class="draft-target">
+          <span class="hint">目标路径</span>
+          <code id="draftTargetKey"></code>
+        </div>
+        <div class="draft-output-box">
+          <span class="hint">渲染器复核输出（确实命中目标路径）</span>
+          <div id="draftOutput" class="main-result"></div>
+          <div id="draftConds" class="chips"></div>
+        </div>
+        <div class="draft-form-row">
+          <label class="field">
+            <span>场景名称</span>
+            <input id="draftName" autocomplete="off">
+          </label>
+        </div>
+        <div class="panel-head">
+          <h4>草稿变量</h4>
+          <span id="draftMeta" class="hint"></span>
+          <button id="btnDraftEdit" class="btn btn-small btn-outline"
+                  title="返回修改 locale 或编辑器变量样例后重新求解">调整 locale / 变量</button>
+        </div>
+        <div id="draftVars" class="draft-vars"></div>
+        <div class="panel-head">
+          <h4>各变量取值依据</h4>
+        </div>
+        <div id="draftBasis" class="draft-basis"></div>
+      </div>
+
+      <div class="modal-foot">
+        <button id="btnDraftCancel" class="btn btn-outline">取消</button>
+        <button id="btnDraftLoad" class="btn btn-outline" hidden
+                title="把草稿的 locale 与变量载入编辑器，不保存到场景集">载入编辑器</button>
+        <button id="btnDraftSave" class="btn" hidden>保存为场景</button>
+      </div>
+    </div>
+  </div>
+
   <div id="toast" class="toast"></div>
   <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>

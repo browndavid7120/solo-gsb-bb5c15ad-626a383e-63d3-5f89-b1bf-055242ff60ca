@@ -763,6 +763,18 @@
         conds.appendChild(chip);
       });
       card.appendChild(conds);
+
+      if (!p.covered) {
+        var draftBtn = document.createElement("button");
+        draftBtn.className = "btn btn-small spath-draft-btn";
+        draftBtn.textContent = "生成场景草稿";
+        draftBtn.title = "反推一组自洽变量，生成可保存的场景草稿";
+        draftBtn.addEventListener("click", function (e) {
+          e.stopPropagation();
+          openDraftModal(p.key, p.conditions);
+        });
+        card.appendChild(draftBtn);
+      }
       scenarioPathsEl.appendChild(card);
     });
   }
@@ -814,6 +826,287 @@
   document.getElementById("btnRunScenarios")
     .addEventListener("click", function () { runScenarios(scenarios, true); });
   document.getElementById("btnExportScenarios").addEventListener("click", exportScenarios);
+
+  /* ---------------- 未覆盖路径场景草稿 ---------------- */
+
+  var draftModalEl = document.getElementById("draftModal");
+  var draftNoticesEl = document.getElementById("draftNotices");
+  var draftFormEl = document.getElementById("draftForm");
+  var draftResultEl = document.getElementById("draftResult");
+  var draftLocaleEl = document.getElementById("draftLocale");
+  var draftVarRowsEl = document.getElementById("draftVarRows");
+  var draftTargetKeyEl = document.getElementById("draftTargetKey");
+  var draftOutputEl = document.getElementById("draftOutput");
+  var draftCondsEl = document.getElementById("draftConds");
+  var draftNameEl = document.getElementById("draftName");
+  var draftMetaEl = document.getElementById("draftMeta");
+  var draftVarsEl = document.getElementById("draftVars");
+  var draftBasisEl = document.getElementById("draftBasis");
+  var btnDraftSave = document.getElementById("btnDraftSave");
+  var btnDraftLoad = document.getElementById("btnDraftLoad");
+
+  var draftState = { key: "", conditions: [], data: null };
+
+  function addDraftVarRow(name, value) {
+    var row = document.createElement("div");
+    row.className = "var-row";
+    var nameInput = document.createElement("input");
+    nameInput.className = "var-name";
+    nameInput.value = name || "";
+    var valueInput = document.createElement("input");
+    valueInput.className = "var-value";
+    valueInput.value = value === undefined || value === null ? "" : String(value);
+    var typeBadge = document.createElement("span");
+    typeBadge.className = "var-type";
+    typeBadge.textContent = typeLabel(parseValue(valueInput.value));
+    valueInput.addEventListener("input", function () {
+      typeBadge.textContent = typeLabel(parseValue(valueInput.value));
+    });
+    var del = document.createElement("button");
+    del.className = "var-del";
+    del.textContent = "×";
+    del.addEventListener("click", function () { row.remove(); });
+    row.appendChild(nameInput);
+    row.appendChild(valueInput);
+    row.appendChild(typeBadge);
+    row.appendChild(del);
+    draftVarRowsEl.appendChild(row);
+  }
+
+  function collectDraftVariables() {
+    var vars = {};
+    var rows = draftVarRowsEl.querySelectorAll(".var-row");
+    for (var i = 0; i < rows.length; i++) {
+      var name = rows[i].querySelector(".var-name").value.trim();
+      var raw = rows[i].querySelector(".var-value").value;
+      if (name) vars[name] = parseValue(raw);
+    }
+    return vars;
+  }
+
+  function openDraftModal(key, conditions) {
+    draftState.key = key;
+    draftState.conditions = conditions || [];
+    draftState.data = null;
+    draftModalEl.hidden = false;
+    draftTargetKeyEl.textContent = key;
+    draftLocaleEl.value = localeInput.value.trim() || "en";
+    draftVarRowsEl.innerHTML = "";
+    var current = collectVariables();
+    Object.keys(current).forEach(function (name) {
+      addDraftVarRow(name, current[name]);
+    });
+    showDraftForm();
+    requestDraft();
+  }
+
+  function closeDraftModal() {
+    draftModalEl.hidden = true;
+    draftState.data = null;
+  }
+
+  function showDraftForm() {
+    draftFormEl.hidden = false;
+    draftResultEl.hidden = true;
+    btnDraftSave.hidden = true;
+    btnDraftLoad.hidden = true;
+  }
+
+  function showDraftError(html) {
+    draftFormEl.hidden = true;
+    draftResultEl.hidden = true;
+    btnDraftSave.hidden = true;
+    btnDraftLoad.hidden = true;
+    draftNoticesEl.innerHTML = html;
+  }
+
+  var REASON_TEXT = {
+    template_error: "模板存在错误",
+    invalid_path_key: "路径键无效",
+    path_not_found: "路径不存在于当前模板",
+    unreachable: "目标路径在该 locale 下不可达",
+    no_solution: "无自洽解",
+    enum_limit: "超过路径枚举上限",
+    invalid_samples: "变量样例非法",
+  };
+
+  function requestDraft() {
+    draftNoticesEl.innerHTML =
+      '<div class="msg msg-info"><span class="tag">求解中</span>' +
+      "<span>正在反推自洽变量并用渲染器复核…</span></div>";
+    btnDraftSave.hidden = true;
+    btnDraftLoad.hidden = true;
+    return fetch("/api/scenarios/draft", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        template: tpl.value,
+        locale: draftLocaleEl.value.trim() || "en",
+        path_key: draftState.key,
+        variables: collectDraftVariables(),
+      }),
+    })
+      .then(function (r) {
+        if (!r.ok) return r.json().then(function (j) { throw new Error(j.error || "请求失败"); });
+        return r.json();
+      })
+      .then(function (resp) {
+        draftNoticesEl.innerHTML = "";
+        if (!resp.ok) {
+          var label = REASON_TEXT[resp.reason] || "求解失败";
+          showDraftError(
+            '<div class="msg msg-error"><span class="tag">' + esc(label) +
+            "</span><span>" + esc(resp.error || "") + "</span></div>" +
+            '<div class="draft-actions-row"><button class="btn btn-outline" ' +
+            'id="btnDraftBack">返回修改变量</button></div>');
+          var back = document.getElementById("btnDraftBack");
+          if (back) back.addEventListener("click", showDraftForm);
+          return null;
+        }
+        draftState.data = resp;
+        renderDraftResult(resp);
+        return resp;
+      })
+      .catch(function (e) {
+        showDraftError(
+          '<div class="msg msg-error"><span class="tag">请求失败</span><span>' +
+          esc(String(e.message || e)) + "</span></div>");
+        return null;
+      });
+  }
+
+  function renderDraftResult(resp) {
+    draftFormEl.hidden = true;
+    draftResultEl.hidden = false;
+    btnDraftSave.hidden = false;
+    btnDraftLoad.hidden = false;
+
+    draftTargetKeyEl.textContent = resp.path_key;
+    draftOutputEl.textContent = resp.verification.output || "（空）";
+    draftCondsEl.innerHTML = "";
+    (resp.verification.conditions || []).forEach(function (c) {
+      var chip = document.createElement("span");
+      chip.className = "chip";
+      chip.textContent = c;
+      draftCondsEl.appendChild(chip);
+    });
+    draftNameEl.value = resp.scenario.name;
+    draftMetaEl.textContent =
+      "locale " + resp.scenario.locale + " · " +
+      Object.keys(resp.scenario.variables).length + " 个变量" +
+      (resp.unused_samples && resp.unused_samples.length
+        ? "（含 " + resp.unused_samples.length + " 个未参与分支的样例变量）"
+        : "");
+
+    draftVarsEl.innerHTML = "";
+    var originMap = {};
+    (resp.basis || []).forEach(function (b) { originMap[b.variable] = b.origin; });
+    Object.keys(resp.scenario.variables).forEach(function (name) {
+      var row = document.createElement("div");
+      row.className = "draft-var-row";
+      var v = resp.scenario.variables[name];
+      row.innerHTML = '<span class="draft-var-name">' + esc(name) + "</span>" +
+        "<span>=</span><span class=\"draft-var-val\">" +
+        esc(JSON.stringify(v)) + "</span>";
+      var origin = document.createElement("span");
+      origin.className = "draft-var-origin " + (originMap[name] || "");
+      origin.textContent = originMap[name] === "sample"
+        ? "沿用编辑器样例"
+        : (originMap[name] === "solver" ? "求解器反推" : "未参与分支");
+      row.appendChild(origin);
+      draftVarsEl.appendChild(row);
+    });
+
+    draftBasisEl.innerHTML = "";
+    (resp.basis || []).forEach(function (b) {
+      var card = document.createElement("div");
+      card.className = "draft-basis-card";
+      var head = document.createElement("div");
+      head.className = "draft-basis-head";
+      head.innerHTML = "<span>" + esc(b.variable) + "</span>" +
+        "<code>= " + esc(JSON.stringify(b.value)) + "</code>" +
+        '<span class="draft-basis-src">' + esc(b.source) + "</span>";
+      card.appendChild(head);
+      if (b.details && b.details.length) {
+        var ul = document.createElement("ul");
+        ul.className = "draft-basis-details";
+        b.details.forEach(function (d) {
+          var li = document.createElement("li");
+          li.textContent = d;
+          ul.appendChild(li);
+        });
+        card.appendChild(ul);
+      }
+      if (b.notes && b.notes.length) {
+        var notes = document.createElement("ul");
+        notes.className = "draft-basis-notes";
+        b.notes.forEach(function (n) {
+          var li = document.createElement("li");
+          li.textContent = "↻ " + n;
+          notes.appendChild(li);
+        });
+        card.appendChild(notes);
+      }
+      draftBasisEl.appendChild(card);
+    });
+  }
+
+  function saveDraft() {
+    var resp = draftState.data;
+    if (!resp) return;
+    var sc = {
+      id: "s" + scenarioSeq++,
+      name: draftNameEl.value.trim() || resp.scenario.name,
+      locale: resp.scenario.locale,
+      variables: resp.scenario.variables,
+    };
+    scenarios.push(sc);
+    saveStore();
+    renderScenarios();
+    closeDraftModal();
+    toast("草稿已保存为场景「" + sc.name + "」，可参与批量回归");
+    runScenarios(scenarios, true);
+  }
+
+  function loadDraftIntoEditor() {
+    var resp = draftState.data;
+    if (!resp) return;
+    localeInput.value = resp.scenario.locale;
+    varRowsEl.innerHTML = "";
+    Object.keys(resp.scenario.variables).forEach(function (name) {
+      var v = resp.scenario.variables[name];
+      addVarRow(name, v === undefined || v === null ? "" : String(v));
+    });
+    closeDraftModal();
+    scheduleAnalyze();
+    toast("已把草稿 locale 与变量载入编辑器（未保存到场景集）");
+  }
+
+  document.getElementById("btnDraftClose")
+    .addEventListener("click", closeDraftModal);
+  document.getElementById("btnDraftCancel")
+    .addEventListener("click", closeDraftModal);
+  document.getElementById("btnDraftRegenerate")
+    .addEventListener("click", requestDraft);
+  draftLocaleEl.addEventListener("change", function () {
+    if (draftModalEl.hidden) return;
+    // locale 改变后目标路径可达性可能变化（如 zh 下 one 不可达），重新求解
+    requestDraft();
+  });
+  btnDraftSave.addEventListener("click", saveDraft);
+  btnDraftLoad.addEventListener("click", loadDraftIntoEditor);
+  document.getElementById("btnDraftEdit")
+    .addEventListener("click", function () {
+      // 返回表单：保留当前 locale 与变量行，允许修改后重新求解
+      showDraftForm();
+      draftNoticesEl.innerHTML = "";
+    });
+  draftModalEl.addEventListener("click", function (e) {
+    if (e.target === draftModalEl) closeDraftModal();
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && !draftModalEl.hidden) closeDraftModal();
+  });
 
   /* ---------------- 版本对比 ---------------- */
 
