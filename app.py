@@ -5,6 +5,7 @@ from flask import Flask, jsonify, render_template, request
 
 from compare import compare_templates
 from contract import audit_contract
+from draft import DraftError, build_scenario_draft
 from icu import MAX_SCENARIOS, analyze, run_scenarios
 
 app = Flask(__name__)
@@ -57,6 +58,45 @@ def scenarios_run():
             "variables": sc.get("variables", {}),
         })
     return jsonify(run_scenarios(template, norm))
+
+
+@app.post("/api/scenarios/draft")
+def scenarios_draft():
+    """为一条未覆盖路径求解可保存的场景草稿，并经渲染器复核命中。
+
+    无解 / 路径不存在 / 超过枚举上限返回 422（body 含 code 与原因），
+    请求体非法返回 400；草稿不会写入任何场景集，仅由调用方确认后保存。
+    """
+    data = request.get_json(force=True, silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"ok": False, "code": "invalid_request",
+                        "error": "请求体必须是 JSON 对象"}), 400
+    template = data.get("template", "")
+    locale = data.get("locale", "en")
+    variables = data.get("variables", {})
+    path_key_value = data.get("path_key")
+    name = data.get("name")
+    if not isinstance(template, str):
+        return jsonify({"ok": False, "code": "invalid_request",
+                        "error": "template 必须是字符串"}), 400
+    if not isinstance(locale, str) or not locale.strip():
+        return jsonify({"ok": False, "code": "invalid_request",
+                        "error": "locale 必须是非空字符串"}), 400
+    if not isinstance(variables, dict):
+        return jsonify({"ok": False, "code": "invalid_request",
+                        "error": "variables 必须是对象"}), 400
+    if not isinstance(path_key_value, str) or not path_key_value.strip():
+        return jsonify({"ok": False, "code": "invalid_request",
+                        "error": "path_key 必须是非空字符串"}), 400
+    if name is not None and not isinstance(name, str):
+        return jsonify({"ok": False, "code": "invalid_request",
+                        "error": "name 必须是字符串"}), 400
+    try:
+        clean_name = name.strip() or None if isinstance(name, str) else None
+        return jsonify(build_scenario_draft(
+            template, locale, variables, path_key_value, name=clean_name))
+    except DraftError as exc:
+        return jsonify(exc.to_response()), exc.status
 
 
 @app.post("/api/compare")

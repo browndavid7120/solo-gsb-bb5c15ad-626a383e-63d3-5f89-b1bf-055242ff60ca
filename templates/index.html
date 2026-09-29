@@ -124,6 +124,46 @@
     </div>
   </section>
 
+  <!-- 未覆盖路径 → 场景草稿模态框 -->
+  <div id="draftModal" class="modal-mask" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="draftModalTitle">
+      <div class="modal-head">
+        <h3 id="draftModalTitle">为未覆盖路径生成场景草稿</h3>
+        <button id="btnDraftClose" class="btn btn-small" title="关闭">×</button>
+      </div>
+      <div class="modal-body">
+        <div id="draftNotices"></div>
+        <div class="draft-row">
+          <label>目标路径 <code id="draftKey"></code></label>
+        </div>
+        <div class="draft-row">
+          <label for="draftLocale">语言环境（locale）</label>
+          <input id="draftLocale" autocomplete="off">
+        </div>
+        <div id="draftConds" class="chips"></div>
+        <div class="draft-row">
+          <label for="draftName">场景名称</label>
+          <input id="draftName" autocomplete="off">
+        </div>
+        <div class="draft-row draft-vars-head">
+          <label>草稿变量取值与依据</label>
+          <button id="btnDraftLoadEditor" class="btn btn-small"
+                  title="把草稿的 locale 与变量载入左侧编辑器">载入编辑器</button>
+        </div>
+        <div id="draftVars" class="draft-vars"></div>
+        <div class="draft-output-wrap">
+          <span class="hint">复核渲染输出（经现有渲染器确认命中目标路径）</span>
+          <div id="draftOutput" class="main-result"></div>
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button id="btnDraftCancel" class="btn btn-outline">取消</button>
+        <button id="btnDraftSave" class="btn"
+                title="保存为场景并加入场景集，可立即参与批量回归">✓ 确认保存为场景</button>
+      </div>
+    </div>
+  </div>
+
   <!-- 版本对比面板 -->
   <section class="compare-panel">
     <div class="panel-head compare-title-row">

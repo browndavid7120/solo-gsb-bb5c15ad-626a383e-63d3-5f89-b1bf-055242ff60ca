@@ -20,7 +20,13 @@
   本地），一键批量调用分析接口并合并每条可达路径的覆盖状态。面板显示总路径数、
   已覆盖 / 未覆盖数量与覆盖率进度条；点击未覆盖项可定位到对应路径的触发条件；
   支持单个场景重跑、删除与「载入编辑器」，并可导出包含场景定义与汇总结果的 JSON。
-  单个场景失败时保留错误信息并继续运行其余场景。
+  单个场景失败时保留错误信息并继续运行其余场景。**每条未覆盖路径旁提供
+  「生成覆盖场景草稿」**：输入当前模板、locale、路径键与编辑器变量样例，后端
+  按实际路由求解一组确实命中该路径的变量取值（同一变量在顺序与嵌套分支中保持
+  同值；`=N`、复数类别、offset 均按渲染器真实路由判断；编辑器样例不满足时继续
+  搜索候选值），给出每个变量取值与候选被拒依据，经现有渲染器复核命中后弹出
+  草稿，确认即可保存为普通场景并立即参与批量回归；无解 / 路径不存在 / 超过
+  枚举上限时返回明确原因，不写入场景集（见 `/api/scenarios/draft`）。
 - **版本对比**：把当前模板设为基线（保存在浏览器本地）后继续编辑，随时与基线
   对比。后端按**语义路径**对齐新旧模板——由变量名、分支类型、选择器及嵌套父链
   拼接而成（如 `gender:select@male/count:plural@one`），不依赖解析器分配的
@@ -117,6 +123,31 @@ python app.py            # 或：gunicorn --bind 0.0.0.0:5000 app:app
    该场景并更新合并）、**删除**。
 6. 点 **导出场景 JSON** 下载 `icu-scenarios.json`，包含模板、全部场景定义、
    每个场景的通过 / 失败状态与错误、路径覆盖汇总与每条路径在各场景下的输出。
+
+#### 为未覆盖路径生成覆盖场景草稿
+
+在「合并路径覆盖」中，每条**未覆盖**路径卡片底部有 **生成覆盖场景草稿** 按钮：
+
+1. 点击按钮，弹出草稿对话框（可在框内改 locale 后回车重新求解）。后端接收
+   当前模板、locale、路径键（`key`，如 `n1:male/n2:=0`）以及编辑器里的变量样例。
+2. 后端按渲染器的**实际路由**为路径上的每个分支变量求解取值：
+   - 同一变量在顺序片段与嵌套分支的多个节点中保持**同一个值**（约束按变量名分组）；
+   - plural / selectordinal 先判 `=N` 显式分支（按原始值、不经过类别），
+     再按 locale 的 CLDR 复数类别匹配；`offset` 只影响分支内 `#` 的显示值，
+     不参与路由判定；
+   - **编辑器样例优先**：样例值能命中该变量在路径上的全部分支时直接沿用；
+     否则继续搜索候选值——首个类别代表值可能在后续同变量节点落入错误分支
+     （例如被某个 `=N` 抢占），每个候选都要通过整条路径上的全部路由约束；
+   - 对话框逐变量展示最终取值、来源（沿用样例 / 求解得到 / 默认占位）、
+     每条分支的命中依据，以及被拒候选（值、在哪个节点冲突、实际路由到的分支）。
+3. 草稿在返回前**必须经现有渲染器复核**：直接渲染的分支命中集合与目标路径
+   完全一致，且 `analyze` 的路径列表中该 `key` 存在并标记为已覆盖；否则不展示。
+4. 无解（如同变量的选择器约束互斥、类别在该 locale 下不可达）、路径不存在
+   （键中的节点 / 选择器 / 嵌套次序与模板不符）或路径数超过枚举上限（300 条，
+   且目标不在可枚举的前 300 条内）时，对话框显示明确原因，**不会写入场景集**。
+5. 点 **载入编辑器** 可把草稿 locale 与变量填回左侧编辑器复核；点
+   **确认保存为场景** 后草稿作为普通场景加入当前场景集（可改名），
+   自动触发一次全量批量回归，合并面板随即反映新增覆盖。
 
 > 单次运行最多 50 个场景；路径合并以模板中分支节点的路由序列为稳定 key，
 > 因此不同 locale 下枚举到的路径会取并集。
@@ -220,6 +251,75 @@ python app.py            # 或：gunicorn --bind 0.0.0.0:5000 app:app
 `paths`（跨场景合并后的路径，含 `key`、`conditions`、`covered`、
 `covered_by` 与各场景输出 `outputs`）。请求体非法或场景数超过 50 返回 400。
 
+`POST /api/scenarios/draft` — 为一条未覆盖路径生成可保存的场景草稿（求解 +
+渲染器复核；不会写入任何场景集，由调用方确认后自行保存）：
+
+```json
+{
+  "template": "{g, select, male{He} other{They}} {n, plural, one{#} other{#s}}",
+  "locale": "en",
+  "variables": {"g": "male", "n": 2},
+  "path_key": "n1:male/n2:one",
+  "name": "男-单数（可选）"
+}
+```
+
+调用示例（curl）：
+
+```bash
+curl -sS -X POST http://localhost:5000/api/scenarios/draft \
+  -H 'Content-Type: application/json' \
+  -d '{"template":"{g, select, male{He} other{They}} {n, plural, one{#} other{#s}}",
+       "locale":"en",
+       "variables":{"g":"male","n":2},
+       "path_key":"n1:male/n2:one"}'
+```
+
+调用示例（Python，取确认后的草稿加入场景集再跑批量回归）：
+
+```python
+import requests
+
+draft = requests.post("http://localhost:5000/api/scenarios/draft", json={
+    "template": template,
+    "locale": "en",
+    "variables": {"g": "male", "n": 2},   # 编辑器变量样例（优先沿用）
+    "path_key": "n1:male/n2:one",         # 来自 /api/scenarios/run 合并结果中
+                                          # covered=false 路径的 key
+}).json()
+
+if draft.get("ok"):
+    sc = draft["scenario"]                # {"name", "locale", "variables"}
+    run = requests.post(
+        "http://localhost:5000/api/scenarios/run",
+        json={"template": template, "scenarios": existing_scenarios + [sc]},
+    ).json()                              # 保存后即可参与批量回归
+```
+
+- 入参：`template` 必填字符串；`locale` 非空字符串（缺省 `en`）；`variables`
+  对象（编辑器样例，求解时优先沿用）；`path_key` 必填非空字符串，取
+  `/api/preview` 或 `/api/scenarios/run` 返回的路径 `key`；`name` 可选。
+  入参非法返回 **400**（`code: invalid_request`）。
+- 成功（**200**）返回：
+  - `scenario`：可直接保存 / 提交给 `/api/scenarios/run` 的
+    `{name, locale, variables}`；
+  - `target`：`key`、路径触发条件 `conditions`、模板路径总数 `total_paths`；
+  - `variable_basis`：每个变量的 `value`、`source`（`editor_sample` = 沿用
+    编辑器样例 / `solved` = 搜索得到 / `default` = 路径外占位默认值）、
+    `routes[]`（逐分支的 `basis` 依据说明、复数 `category` 与 `offset`）、
+    `rejected[]`（被拒候选值、来源、冲突节点与原因）以及路径外变量的 `note`；
+  - `output` 与 `verification`：现有渲染器复核的渲染输出与命中信息
+    （`hit/covered/key/path_id`），确认草稿确实覆盖目标路径。
+- 语义失败返回 **422**，body 中 `code` 区分原因，**不产生可保存场景**：
+  - `unsat`：无解——同变量在顺序 / 嵌套分支上的选择器约束无法同时满足，
+    或类别在该 locale 下不可达（被 `=N` 抢占 / 类别不存在）；
+    `details` 含冲突变量、约束列表与逐个被拒候选；
+  - `path_not_found`：路径键中的节点 id、选择器或嵌套次序与当前模板不符
+    （路径不存在），或路径在模板有分支节点处提前结束；
+  - `path_limit_exceeded`：模板路径数超过枚举上限 300 且目标不在可枚举的
+    前 300 条内（或枚举达搜索保护上限 10000）；
+  - `template_error`：模板存在语法错误，`details.errors` 带行列号。
+
 `POST /api/compare` — 版本对比（语义对齐新旧模板，场景双版回放）：
 
 ```json
@@ -312,15 +412,18 @@ python app.py            # 或：gunicorn --bind 0.0.0.0:5000 app:app
 ## 项目结构
 
 ```
-├── app.py               # Flask 入口（/、/api/preview、/api/scenarios/run、/api/compare、/api/contract-audit）
+├── app.py               # Flask 入口（/、/api/preview、/api/scenarios/run、
+│                        #   /api/scenarios/draft、/api/compare、/api/contract-audit）
 ├── icu.py               # ICU 解析器、渲染器、分支枚举、覆盖分析与场景集合并
+├── draft.py             # 未覆盖路径 → 场景草稿：路由约束求解、候选回溯与渲染器复核
 ├── compare.py           # 版本对比：语义路径对齐、结构差异与场景双版回放
 ├── contract.py          # 变量契约：AST 类型/必需性推导、场景批量审计与 JSON Schema 草案
-├── templates/index.html # 单页界面（含场景集回归、版本对比与变量契约审计面板）
-├── static/app.js        # 前端逻辑（高亮、实时分析、场景集、版本对比、契约审计、复制、导出）
+├── templates/index.html # 单页界面（含场景集回归与未覆盖路径草稿、版本对比、契约审计面板）
+├── static/app.js        # 前端逻辑（高亮、实时分析、场景集/草稿、版本对比、契约审计、复制、导出）
 ├── static/style.css
 ├── tests/test_icu.py    # ICU 解析/渲染/场景集单元测试
 ├── tests/test_app.py    # Flask 接口测试
+├── tests/test_draft.py  # 草稿求解（同值约束/=N/类别/offset/回溯/复核）与 /api/scenarios/draft 测试
 ├── tests/test_compare.py# 版本对比与 /api/compare 测试
 ├── tests/test_contract.py# 变量契约推导与 /api/contract-audit 测试
 ├── requirements.txt

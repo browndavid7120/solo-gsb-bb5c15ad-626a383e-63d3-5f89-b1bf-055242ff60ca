@@ -838,3 +838,102 @@ body {
   white-space: pre-wrap;
   word-break: break-word;
 }
+
+/* ---------- 未覆盖路径 → 场景草稿 ---------- */
+
+.spath-draft-btn {
+  margin: 8px 12px 10px;
+  align-self: flex-start;
+  border-color: var(--warn);
+  color: var(--warn);
+}
+.spath-draft-btn:hover { filter: brightness(0.97); }
+
+.modal-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(31, 36, 48, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 40;
+  padding: 20px;
+}
+.modal-mask[hidden] { display: none; }
+.modal {
+  background: var(--panel);
+  border-radius: 10px;
+  width: min(760px, 100%);
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 18px 48px rgba(31, 36, 48, 0.28);
+}
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+}
+.modal-head h3 { margin: 0; font-size: 15px; }
+.modal-body {
+  padding: 14px 18px;
+  overflow: auto;
+}
+.modal-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--border);
+}
+.modal input {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 10px;
+  font: inherit;
+  width: 100%;
+}
+.draft-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 8px 0;
+}
+.draft-row label { flex: 0 0 auto; color: var(--muted); font-size: 13px; }
+.draft-row input { flex: 1; }
+.draft-vars-head { justify-content: space-between; }
+.draft-vars-head label { flex: 1; }
+.draft-var-card {
+  border: 1px solid var(--border);
+  border-left-width: 3px;
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin: 8px 0;
+  background: #fbfcfe;
+}
+.draft-var-card.src-solved { border-left-color: var(--warn); }
+.draft-var-card.src-editor_sample { border-left-color: var(--ok); }
+.draft-var-card.src-default { border-left-color: var(--muted); }
+.draft-var-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.draft-var-value { font-family: var(--mono); font-size: 12.5px; }
+.draft-basis, .draft-rejected, .draft-note {
+  font-size: 12.5px;
+  margin-top: 4px;
+  line-height: 1.5;
+}
+.draft-basis { color: #3f4756; }
+.draft-note { color: var(--muted); }
+.draft-rejected { color: #b45309; }
+.draft-output-wrap { margin-top: 12px; }
+.draft-output-wrap .main-result {
+  margin-top: 4px;
+  font-size: 13px;
+  min-height: 0;
+}

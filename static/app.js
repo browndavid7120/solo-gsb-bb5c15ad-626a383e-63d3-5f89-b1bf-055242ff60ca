@@ -763,6 +763,18 @@
         conds.appendChild(chip);
       });
       card.appendChild(conds);
+
+      if (!p.covered) {
+        var draftBtn = document.createElement("button");
+        draftBtn.className = "btn btn-small spath-draft-btn";
+        draftBtn.textContent = "生成覆盖场景草稿";
+        draftBtn.title = "求解一条命中该路径的变量取值，经渲染器复核后可保存为场景";
+        draftBtn.addEventListener("click", function (ev) {
+          ev.stopPropagation();
+          requestDraft(p.key);
+        });
+        card.appendChild(draftBtn);
+      }
       scenarioPathsEl.appendChild(card);
     });
   }
@@ -814,6 +826,192 @@
   document.getElementById("btnRunScenarios")
     .addEventListener("click", function () { runScenarios(scenarios, true); });
   document.getElementById("btnExportScenarios").addEventListener("click", exportScenarios);
+
+  /* ---------------- 未覆盖路径 → 场景草稿 ---------------- */
+
+  var draftModalEl = document.getElementById("draftModal");
+  var draftNoticesEl = document.getElementById("draftNotices");
+  var draftKeyEl = document.getElementById("draftKey");
+  var draftLocaleEl = document.getElementById("draftLocale");
+  var draftCondsEl = document.getElementById("draftConds");
+  var draftNameEl = document.getElementById("draftName");
+  var draftVarsEl = document.getElementById("draftVars");
+  var draftOutputEl = document.getElementById("draftOutput");
+  var draftSaveBtn = document.getElementById("btnDraftSave");
+
+  var currentDraft = null;   // 最近一次草稿响应（/api/scenarios/draft）
+  var draftRequestSeq = 0;
+  var draftTemplate = null;  // 草稿对应的模板快照（保存前若模板被修改则拒绝保存）
+
+  function sourceLabel(src) {
+    if (src === "editor_sample") return '<span class="badge badge-covered">沿用样例</span>';
+    if (src === "solved") return '<span class="badge badge-uncovered">求解得到</span>';
+    return '<span class="badge badge-dead">默认占位</span>';
+  }
+
+  function closeDraftModal() {
+    draftModalEl.hidden = true;
+    currentDraft = null;
+    draftTemplate = null;
+  }
+
+  function renderDraftError(code, message) {
+    var tip = "";
+    if (code === "unsat") tip = "该路径在给定 locale 下无解（变量约束无法同时满足）。";
+    else if (code === "path_not_found") tip = "目标路径在当前模板中不存在。";
+    else if (code === "path_limit_exceeded") tip = "路径数量超过枚举上限（300 条）。";
+    else if (code === "template_error") tip = "请先修正模板错误。";
+    draftNoticesEl.innerHTML =
+      '<div class="msg msg-error"><span class="tag">无法生成草稿</span>' +
+      "<span>" + esc(message) + (tip ? "（" + tip + "）" : "") + "</span></div>";
+    draftVarsEl.innerHTML = "";
+    draftCondsEl.innerHTML = "";
+    draftOutputEl.textContent = "—";
+    draftSaveBtn.disabled = true;
+  }
+
+  function renderDraft(resp) {
+    currentDraft = resp;
+    draftNoticesEl.innerHTML =
+      '<div class="msg msg-info"><span class="tag">已复核</span>' +
+      "<span>草稿经现有渲染器确认命中目标路径，保存后将作为普通场景参与批量回归。</span></div>";
+    draftKeyEl.textContent = resp.target.key;
+    draftCondsEl.innerHTML = "";
+    (resp.target.conditions || []).forEach(function (c) {
+      var chip = document.createElement("span");
+      chip.className = "chip";
+      chip.textContent = c;
+      draftCondsEl.appendChild(chip);
+    });
+    draftOutputEl.textContent = resp.output || "（空）";
+    draftSaveBtn.disabled = false;
+
+    draftVarsEl.innerHTML = "";
+    (resp.variable_basis || []).forEach(function (vb) {
+      var card = document.createElement("div");
+      card.className = "draft-var-card src-" + vb.source;
+      var head = document.createElement("div");
+      head.className = "draft-var-head";
+      head.innerHTML = "<code>" + esc(vb.name) + "</code>" +
+        '<span class="draft-var-value">= ' + esc(JSON.stringify(vb.value)) + "</span>" +
+        sourceLabel(vb.source);
+      card.appendChild(head);
+
+      if (vb.note) {
+        var note = document.createElement("div");
+        note.className = "draft-note";
+        note.textContent = vb.note;
+        card.appendChild(note);
+      }
+      (vb.routes || []).forEach(function (rt) {
+        var line = document.createElement("div");
+        line.className = "draft-basis";
+        line.textContent = "▸ " + rt.basis;
+        card.appendChild(line);
+      });
+      (vb.rejected || []).forEach(function (rj) {
+        var line = document.createElement("div");
+        line.className = "draft-rejected";
+        line.textContent = "✗ 候选 " + JSON.stringify(rj.value) +
+          "：" + rj.reason;
+        card.appendChild(line);
+      });
+      draftVarsEl.appendChild(card);
+    });
+  }
+
+  function requestDraft(key) {
+    var seq = ++draftRequestSeq;
+    draftTemplate = tpl.value;
+    draftModalEl.hidden = false;
+    draftNoticesEl.innerHTML =
+      '<div class="msg msg-info"><span class="tag">求解中</span>' +
+      "<span>正在搜索满足整条路径路由约束的变量取值…</span></div>";
+    draftKeyEl.textContent = key;
+    draftLocaleEl.value = localeInput.value.trim() || "en";
+    draftNameEl.value = "覆盖路径 " + key;
+    draftCondsEl.innerHTML = "";
+    draftVarsEl.innerHTML = "";
+    draftOutputEl.textContent = "—";
+    draftSaveBtn.disabled = true;
+    currentDraft = null;
+
+    fetch("/api/scenarios/draft", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        template: tpl.value,
+        locale: draftLocaleEl.value,
+        variables: collectVariables(),
+        path_key: key,
+      }),
+    })
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, body: j }; }); })
+      .then(function (res) {
+        if (seq !== draftRequestSeq) return;
+        if (res.ok && res.body.ok) {
+          draftNameEl.value = res.body.scenario.name || ("覆盖路径 " + key);
+          renderDraft(res.body);
+        } else {
+          renderDraftError(res.body.code || "error",
+                           res.body.error || "生成草稿失败");
+        }
+      })
+      .catch(function (e) {
+        if (seq !== draftRequestSeq) return;
+        renderDraftError("error", "请求失败：" + (e.message || e));
+      });
+  }
+
+  function saveDraftAsScenario() {
+    if (!currentDraft) { toast("尚无已复核的草稿"); return; }
+    if (draftTemplate !== tpl.value) {
+      toast("草稿基于旧模板内容，请重新生成草稿");
+      return;
+    }
+    var sc = {
+      id: "s" + scenarioSeq++,
+      name: draftNameEl.value.trim() || currentDraft.scenario.name || "覆盖路径场景",
+      locale: currentDraft.locale,
+      variables: currentDraft.scenario.variables,
+    };
+    scenarios.push(sc);
+    saveStore();
+    resetScenarioRuntime();
+    renderScenarios();
+    renderMerge();
+    closeDraftModal();
+    toast("已保存场景「" + sc.name + "」，可运行批量回归验证覆盖");
+    // 保存后立即全量回归，让合并面板反映新增覆盖
+    runScenarios(scenarios, true);
+  }
+
+  function loadDraftIntoEditor() {
+    if (!currentDraft) return;
+    localeInput.value = currentDraft.locale;
+    varRowsEl.innerHTML = "";
+    Object.keys(currentDraft.scenario.variables || {}).forEach(function (name) {
+      var v = currentDraft.scenario.variables[name];
+      addVarRow(name, v === null || v === undefined ? "" : String(v));
+    });
+    scheduleAnalyze();
+    toast("草稿变量已载入编辑器");
+  }
+
+  document.getElementById("btnDraftClose")
+    .addEventListener("click", closeDraftModal);
+  document.getElementById("btnDraftCancel")
+    .addEventListener("click", closeDraftModal);
+  draftModalEl.addEventListener("click", function (e) {
+    if (e.target === draftModalEl) closeDraftModal();
+  });
+  draftSaveBtn.addEventListener("click", saveDraftAsScenario);
+  document.getElementById("btnDraftLoadEditor")
+    .addEventListener("click", loadDraftIntoEditor);
+  draftLocaleEl.addEventListener("change", function () {
+    var key = draftKeyEl.textContent;
+    if (key && !draftModalEl.hidden) requestDraft(key);
+  });
 
   /* ---------------- 版本对比 ---------------- */
 
